@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chitopo · Balanza en vivo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500;800&family=Red+Hat+Text:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* VOICE: tablero de planta, directo, se lee de un vistazo desde el celular
+   IDEA: el display de la balanza multicabezal llevado al bolsillo
+   PICTURE: anillo de estado grande + curva de kg del día
+   COLOUR: navy profundo, verde = produciendo, ámbar = parada, rojo = falla
+   TYPE: Red Hat Display 800 cifras, Red Hat Text cuerpo · LAYOUT: una columna en celular, grilla en escritorio */
+:root{--bg:#0b1433;--card:#121d45;--ink:#eef1ff;--mut:#9aa6d6;--line:#26346e;--ok:#3ddc84;--warn:#f7c948;--bad:#ff5a4e;--acc:#4fc1c6}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Red Hat Text",system-ui,sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:clamp(14px,3vw,32px)}
+h1{font:800 clamp(26px,4vw,40px)/1.05 "Red Hat Display",sans-serif;margin:0}
+.top{display:flex;flex-wrap:wrap;gap:12px;align-items:end;justify-content:space-between;margin-bottom:18px}
+.sub{color:var(--mut);font-size:14px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+.hero{display:grid;gap:18px;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);align-items:center}
+@media(max-width:760px){.hero{grid-template-columns:1fr}}
+.estado{display:flex;gap:16px;align-items:center}
+.dot{width:72px;height:72px;border-radius:50%;flex:none;box-shadow:0 0 0 8px rgba(255,255,255,.05)}
+.big{font:800 clamp(30px,5vw,48px)/1 "Red Hat Display",sans-serif}
+.lbl{color:var(--mut);font-size:13px}
+.kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.kpi .big{font-size:clamp(26px,4vw,38px)}
+.fig{position:relative;height:260px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--mut);font-weight:600}
+.scroll{overflow-x:auto}
+.warnbar{background:#3a1f12;border:1px solid var(--bad);color:#ffd2cc;border-radius:10px;padding:10px 14px;margin-bottom:14px;display:none}
+button,input{font:inherit;font-size:16px;border-radius:10px;border:1px solid var(--line);min-height:44px;padding:8px 14px}
+input{background:#0e1738;color:var(--ink);width:100%}
+button{background:var(--acc);color:#06122e;font-weight:600;cursor:pointer;border:0}
+button.sec{background:transparent;color:var(--mut);border:1px solid var(--line)}
+#login{max-width:380px;margin:12vh auto}
+#login form{display:grid;gap:12px}
+.err{color:var(--bad);min-height:1.4em}
+h2{font:800 20px/1.2 "Red Hat Display",sans-serif;margin:0 0 10px}
+</style>
+</head>
+<body>
+<div id="login" class="wrap" hidden>
+  <h1>Balanza Chitopo</h1>
+  <p class="sub">Ingresá con tu usuario para ver la producción en vivo.</p>
+  <form id="f">
+    <input id="em" type="email" placeholder="correo" autocomplete="username" required>
+    <input id="pw" type="password" placeholder="contraseña" autocomplete="current-password" required>
+    <button>Entrar</button>
+    <div class="err" id="lerr"></div>
+  </form>
+</div>
+
+<div id="app" class="wrap" hidden>
+  <div class="top">
+    <div><h1>Balanza 10 cabezales · Chitopo</h1><div class="sub" id="act">—</div></div>
+    <button class="sec" id="salir">Salir</button>
+  </div>
+  <div class="warnbar" id="warn"></div>
+
+  <div class="card hero">
+    <div class="estado">
+      <div class="dot" id="dot"></div>
+      <div><div class="big" id="est">—</div><div class="sub" id="prod">—</div><div class="sub" id="param">—</div></div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Kilos hoy</div><div class="big" id="kg">—</div></div>
+      <div class="kpi"><div class="lbl">Bolsas hoy</div><div class="big" id="bol">—</div><div class="sub" id="caj"></div></div>
+      <div class="kpi"><div class="lbl">En tolerancia</div><div class="big" id="ok">—</div></div>
+      <div class="kpi"><div class="lbl">Velocidad</div><div class="big" id="vel">—</div><div class="sub" id="velset"></div></div>
+    </div>
+  </div>
+
+  <div class="grid" style="margin-top:14px">
+    <div class="card" style="grid-column:1/-1"><h2>Kilos acumulados hoy</h2><div class="fig"><canvas id="ch"></canvas></div></div>
+    <div class="card"><h2>Por producto (hoy)</h2><div class="scroll"><table id="tsku"></table></div></div>
+    <div class="card"><h2>Tiempos de hoy</h2><div id="tiempos" class="sub"></div></div>
+    <div class="card" style="grid-column:1/-1"><h2>Últimos 30 días</h2><div class="scroll"><table id="tdias"></table></div></div>
+  </div>
+  <p class="sub">Datos enviados por la placa de la oficina cada 30 s (estado) y cada minuto (histórico). Horario de Chile.</p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+{
+const URL_SB = "https://ewxwphglvkgflspddahf.supabase.co";
+const KEY = "sb_publishable_Ed4vH1Kq5njMyk9A_OYUPg_Yt_ltDV1";
+const EQ = "balanza10c-chitopo";
+const sb = supabase.createClient(URL_SB, KEY);
+const $ = id => document.getElementById(id);
+const EST = {0:["Manual","var(--warn)"],1:["Parada","var(--warn)"],2:["Calibración","var(--warn)"],3:["Produciendo","var(--ok)"],4:["Simulación","var(--warn)"],5:["Vaciado","var(--warn)"],6:["Cero","var(--warn)"]};
+const nf = (v,d=0) => v==null||isNaN(v) ? "—" : Number(v).toLocaleString("es-CL",{minimumFractionDigits:d,maximumFractionDigits:d});
+const bolsasCaja = g => g && g <= 20 ? 80 : 15;
+let chart = null, timer = null;
+
+async function sesion(){
+  const { data } = await sb.auth.getSession();
+  if (data.session) { $("login").hidden = true; $("app").hidden = false; cargar(); clearInterval(timer); timer = setInterval(cargar, 15000); }
+  else { $("app").hidden = true; $("login").hidden = false; clearInterval(timer); }
+}
+$("f").addEventListener("submit", async e => {
+  e.preventDefault(); $("lerr").textContent = "";
+  const { error } = await sb.auth.signInWithPassword({ email: $("em").value.trim(), password: $("pw").value });
+  if (error) $("lerr").textContent = "No pude entrar: revisá correo y contraseña."; else sesion();
+});
+$("salir").addEventListener("click", async () => { await sb.auth.signOut(); sesion(); });
+
+function hoyChile(){ return new Date().toLocaleDateString("en-CA",{timeZone:"America/Santiago"}); }
+
+async function cargar(){
+  const [a, l, d] = await Promise.all([
+    sb.from("estado_actual").select("*").eq("equipo", EQ).maybeSingle(),
+    sb.from("lecturas").select("ts,kg_dia,bolsas_dia,vel_real,estado").eq("equipo", EQ)
+      .gte("ts", new Date(Date.now() - 26*3600e3).toISOString()).order("ts").limit(2000),
+    sb.from("dias").select("*").eq("equipo", EQ).order("fecha", {ascending:false}).limit(30)
+  ]);
+  if (a.error || l.error || d.error) { $("warn").style.display = "block"; $("warn").textContent = "Error leyendo la nube: " + (a.error||l.error||d.error).message; return; }
+  pintarEstado(a.data); pintarCurva(l.data || []); pintarDias(d.data || []);
+}
+
+function pintarEstado(s){
+  if (!s) { $("est").textContent = "Sin datos todavía"; return; }
+  const edad = (Date.now() - new Date(s.ts)) / 1000;
+  $("act").textContent = "Actualizado " + new Date(s.ts).toLocaleString("es-CL",{timeZone:"America/Santiago",hour:"2-digit",minute:"2-digit",second:"2-digit",day:"2-digit",month:"2-digit"}) + (s.fw ? " · " + s.fw : "");
+  const w = $("warn");
+  if (edad > 180) { w.style.display="block"; w.textContent = "La placa no envía datos hace " + Math.round(edad/60) + " min (¿sin internet en la oficina o placa apagada?). Lo que ves es el último dato recibido."; }
+  else if (!s.comm) { w.style.display="block"; w.textContent = "La placa de la máquina no está comunicando con la balanza (máquina apagada, WiFi MASTER1 o Bluetooth)."; }
+  else if (s.falla) { w.style.display="block"; w.textContent = "La balanza reporta código de falla " + s.falla + "."; }
+  else w.style.display = "none";
+  const e = s.comm ? (EST[s.estado] || ["Estado " + s.estado, "var(--warn)"]) : ["Sin comunicación", "var(--bad)"];
+  $("est").textContent = e[0]; $("dot").style.background = e[1];
+  $("prod").textContent = (s.sku_nombre || s.sku || "—") + (s.receta != null ? " · programa " + s.receta : "");
+  $("param").textContent = "Objetivo " + nf(s.obj_g,1) + " g · +" + nf(s.dsup_g,1) + " / −" + nf(s.dinf_g,1) + " g";
+  $("kg").textContent = nf(s.kg_dia,1);
+  $("bol").textContent = nf(s.bolsas_dia);
+  $("caj").textContent = s.bolsas_dia ? nf(s.bolsas_dia / bolsasCaja(s.obj_g),1) + " cajas" : "";
+  $("ok").textContent = s.bolsas_dia ? nf(100 * s.ok_dia / s.bolsas_dia,1) + " %" : "—";
+  $("vel").textContent = nf(s.vel_real) + " bpm"; $("velset").textContent = "seteada " + nf(s.vel_set);
+  const filas = (s.por_sku || []).map(x => `<tr><td>${esc(x.nombre||x.sku)}</td><td>${nf(x.kg,1)}</td><td>${nf(x.bolsas)}</td><td>${nf(x.media_g,1)}</td><td>${nf(x.desvio_g,2)}</td><td>${x.bolsas?nf(100*x.ok/x.bolsas,1):"—"}</td></tr>`).join("");
+  $("tsku").innerHTML = "<tr><th>Producto</th><th>kg</th><th>Bolsas</th><th>Media g</th><th>Desvío g</th><th>% tol.</th></tr>" + (filas || '<tr><td colspan="6">Sin descargas hoy</td></tr>');
+  const ult = s.ult_desc_ts ? Math.round((Date.now()/1000 - s.ult_desc_ts)/60) : null;
+  $("tiempos").innerHTML = `Tiempo en Auto: <b>${nf((s.t_auto_dia||0)/3600,1)} h</b><br>Última descarga: <b>${ult==null?"—":ult<1?"hace menos de 1 min":"hace "+ult+" min"}</b><br>Odómetro de bolsas: ${nf(s.odo_bolsas)}`;
+}
+
+function pintarCurva(rows){
+  const hoy = hoyChile();
+  const pts = rows.filter(r => new Date(r.ts).toLocaleDateString("en-CA",{timeZone:"America/Santiago"}) === hoy)
+    .map(r => ({ x: new Date(r.ts).toLocaleTimeString("es-CL",{timeZone:"America/Santiago",hour:"2-digit",minute:"2-digit"}), y: r.kg_dia }));
+  const cfg = { type:"line", data:{ labels: pts.map(p=>p.x), datasets:[{ data: pts.map(p=>p.y), borderColor:"#3ddc84", backgroundColor:"rgba(61,220,132,.15)", fill:true, pointRadius:0, tension:.2 }] },
+    options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: c => nf(c.parsed.y,1)+" kg" } } },
+      scales:{ x:{ ticks:{ color:"#9aa6d6", maxTicksLimit:8 }, grid:{ color:"#1c2860" } }, y:{ beginAtZero:true, ticks:{ color:"#9aa6d6" }, grid:{ color:"#1c2860" } } } } };
+  if (!chart) chart = new Chart($("ch"), cfg); else { chart.data = cfg.data; chart.update(); }
+}
+
+function pintarDias(rows){
+  const f = rows.map(r => `<tr><td>${r.fecha.split("-").reverse().join("/")}</td><td>${nf(r.kg,1)}</td><td>${nf(r.bolsas)}</td><td>${r.bolsas?nf(100*r.ok/r.bolsas,1):"—"}</td><td>${nf((r.seg_auto||0)/3600,1)}</td></tr>`).join("");
+  $("tdias").innerHTML = "<tr><th>Día</th><th>kg</th><th>Bolsas</th><th>% tol.</th><th>h Auto</th></tr>" + (f || '<tr><td colspan="5">Todavía no hay días registrados en la nube</td></tr>');
+}
+function esc(t){ return String(t).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+sb.auth.onAuthStateChange(() => {});
+sesion();
+}
+</script>
+</body>
+</html>
